@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:mtproject/pages/home_page.dart';
-import 'package:mtproject/services/firebase_parking_service.dart';
 import 'dart:async';
+import 'package:mtproject/pages/home_page.dart';
+import 'package:mtproject/services/parking_functions.dart'; // สำหรับโหมดจริง (Functions)
+import 'package:mtproject/services/firebase_parking_service.dart'; // fallback โหมด dev (client)
 
 class SearchingPage extends StatefulWidget {
   const SearchingPage({super.key});
@@ -12,9 +12,7 @@ class SearchingPage extends StatefulWidget {
 }
 
 class _SearchingPageState extends State<SearchingPage> {
-  final FirebaseParkingService _parkingService = FirebaseParkingService();
-
-  DocumentSnapshot? recommendedSpot;
+  final _svc = FirebaseParkingService();
 
   @override
   void initState() {
@@ -23,48 +21,70 @@ class _SearchingPageState extends State<SearchingPage> {
   }
 
   Future<void> _startSearching() async {
+    // 1) ลองเรียก Cloud Function (ถ้าคุณ deploy ไว้แล้ว)
     try {
-      recommendedSpot = await _parkingService
-          .getRecommendedSpot()
-          .timeout(const Duration(seconds: 5));
+      final result = await ParkingFunctions.recommend(
+        entryX: 310,
+        entryY: 150,
+        holdSeconds: 120,
+      ) // จุดเข้า "ขวาบน"
+      .timeout(const Duration(seconds: 6));
+
+      if (mounted && result != null) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomePage(recommendedSpot: result.id),
+          ),
+        );
+        return;
+      }
+    } catch (_) {
+      // เงียบ ๆ แล้วไป fallback ด้านล่าง
+    }
+
+    // 2) Fallback โหมด dev: เลือกตาม "ลำดับเส้นทาง one-way" บน client
+    try {
+      final doc = await _svc.getRecommendedByPathOrder().timeout(
+        const Duration(seconds: 4),
+      );
+      if (!mounted) return;
+
+      if (doc != null) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomePage(recommendedSpot: doc['id'] as int),
+          ),
+        );
+      } else {
+        _noSpotAndBack();
+      }
     } on TimeoutException {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("ค้นหานานเกินไป กรุณาลองใหม่")),
-      );
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomePage()),
-      );
-      return;
-    }
-
-    if (recommendedSpot != null) {
+      _show('ค้นหานานเกินไป กรุณาลองใหม่');
+      _goHome();
+    } catch (e) {
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => HomePage(
-            recommendedSpot: recommendedSpot!['id'], // ส่ง id ไป home
-          ),
-        ),
-      );
+      _show('เกิดข้อผิดพลาด: $e');
+      _goHome();
     }
-    else {
-      if (!mounted) return;
+  }
 
-      // ❗ ไม่พบช่องว่าง → กลับหน้าเดิม + แจ้งเตือน
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("ไม่พบที่จอดรถว่างในขณะนี้")),
-      );
+  void _noSpotAndBack() {
+    _show('ขณะนี้ไม่มีช่องว่าง');
+    _goHome();
+  }
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const HomePage(),
-        ),
-      );
-    }
+  void _goHome() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const HomePage()),
+    );
+  }
+
+  void _show(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override

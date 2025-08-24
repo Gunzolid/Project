@@ -17,6 +17,7 @@ class AdminParkingPage extends StatelessWidget {
             tooltip: 'ออกจากระบบ',
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
+              if (!context.mounted) return;
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(builder: (_) => const LoginPage()),
               );
@@ -26,7 +27,5 @@ class AdminParkingPage extends StatelessWidget {
       ),
       body: const AdminParkingMapLayout(),
     );
-
-
   }
 }

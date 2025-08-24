@@ -1,32 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:mtproject/services/firebase_parking_service.dart';
 
 class AdminParkingBox extends StatelessWidget {
   final String docId;
   final int id;
   final Axis direction;
-
-  const AdminParkingBox({
+  AdminParkingBox({
     super.key,
     required this.docId,
     required this.id,
     this.direction = Axis.vertical,
   });
 
+  final _svc = FirebaseParkingService();
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('parking_spots')
-          .doc(docId)
-          .snapshots(),
+      stream:
+          FirebaseFirestore.instance
+              .collection('parking_spots')
+              .doc(docId)
+              .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (!snapshot.hasData || snapshot.data?.data() == null) {
           return const SizedBox(width: 30, height: 45);
         }
 
         final data = snapshot.data!.data() as Map<String, dynamic>;
-        final status = data['status'] ?? 'unknown';
+        final status = (data['status'] ?? 'unknown') as String;
 
         Color color;
         switch (status) {
@@ -44,7 +47,16 @@ class AdminParkingBox extends StatelessWidget {
         }
 
         return GestureDetector(
-          onTap: () => _toggleStatus(docId, status),
+          onTap: () async {
+            try {
+              final next = _nextStatus(status);
+              await _svc.setStatus(docId, next);
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('เปลี่ยนสถานะไม่สำเร็จ: $e')),
+              );
+            }
+          },
           child: Container(
             width: direction == Axis.vertical ? 30 : 45,
             height: direction == Axis.vertical ? 45 : 30,
@@ -55,10 +67,7 @@ class AdminParkingBox extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: FittedBox(
-              child: Text(
-                '$id',
-                style: const TextStyle(color: Colors.white),
-              ),
+              child: Text('$id', style: const TextStyle(color: Colors.white)),
             ),
           ),
         );
@@ -66,20 +75,9 @@ class AdminParkingBox extends StatelessWidget {
     );
   }
 
-  void _toggleStatus(String docId, String currentStatus) {
-    String nextStatus;
-    if (currentStatus == 'available') {
-      nextStatus = 'occupied';
-    } else if (currentStatus == 'occupied') {
-      nextStatus = 'unavailable';
-    } else {
-      nextStatus = 'available';
-    }
-
-    FirebaseFirestore.instance.collection('parking_spots').doc(docId).update({
-      'status': nextStatus,
-      'start_time': nextStatus == 'occupied' ? Timestamp.now() : null,
-      'duration_minutes': 0,
-    });
+  String _nextStatus(String current) {
+    if (current == 'available') return 'occupied';
+    if (current == 'occupied') return 'unavailable';
+    return 'available'; // รวมกรณี unavailable/unknown → available
   }
 }
