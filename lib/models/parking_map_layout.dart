@@ -12,7 +12,7 @@ class ParkingMapLayout extends StatelessWidget {
       maxScale: 3.0,
       minScale: 0.1, //
       child: Center(
-        child: Container(
+        child: SizedBox(
           width: 800,
           height: 1400,
           child: Stack(
@@ -25,7 +25,7 @@ class ParkingMapLayout extends StatelessWidget {
               ),
               // ถนนแนวนอนล่าง
               Positioned(
-                bottom: 50,
+                top: 570,
                 left: 50,
                 child: Container(width: 300, height: 40, color: Colors.black),
               ),
