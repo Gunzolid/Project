@@ -23,19 +23,21 @@ class ParkingBox extends StatefulWidget {
 class _ParkingBoxState extends State<ParkingBox>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<Color?> _colorAnimation;
+  late Animation<Color?> _blinkColor;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 1000),
+      // ความเร็วกระพริบ ปรับได้
+      duration: const Duration(milliseconds: 800),
       vsync: this,
-    )..repeat(reverse: true);
+    );
 
-    _colorAnimation = ColorTween(
-      begin: Colors.yellow,
-      end: Colors.transparent,
+    // เปลี่ยนสีจาก "เขียว -> เหลือง" แล้ว reverse กลับเป็น "เขียว"
+    _blinkColor = ColorTween(
+      begin: Colors.green,
+      end: Colors.yellow,
     ).animate(_controller);
   }
 
@@ -45,24 +47,36 @@ class _ParkingBoxState extends State<ParkingBox>
     super.dispose();
   }
 
+  // เรียกทุกครั้งที่ prop เปลี่ยน เพื่อ start/stop ตามสถานะ blink
+  void _ensureBlinking(bool shouldBlink) {
+    if (shouldBlink) {
+      if (!_controller.isAnimating) {
+        _controller.repeat(reverse: true);
+      }
+    } else {
+      if (_controller.isAnimating) {
+        _controller.stop();
+      }
+    }
+  }
+
   String _getElapsedTime(Timestamp startTime) {
     final now = DateTime.now();
     final started = startTime.toDate();
     final diff = now.difference(started);
     final hours = diff.inHours;
     final minutes = diff.inMinutes % 60;
-    if (hours > 0) return '$hours ชม. ${minutes} นาที';
+    if (hours > 0) return '$hours ชม. $minutes นาที';
     return '$minutes นาที';
   }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      stream:
-          FirebaseFirestore.instance
-              .collection('parking_spots')
-              .doc(widget.docId)
-              .snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection('parking_spots')
+          .doc(widget.docId)
+          .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.data() == null) {
           return const SizedBox(width: 30, height: 45);
@@ -73,18 +87,16 @@ class _ParkingBoxState extends State<ParkingBox>
         final Timestamp? startTime = data['start_time'] as Timestamp?;
         final String? holdBy = data['hold_by'] as String?;
         final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
+
         final bool isRecommended = widget.recommendedId == widget.id;
 
-        // เงื่อนไข: เป็นช่องที่ถูกแนะนำ "ของฉัน" จริง ๆ (held + hold_by เป็น uid ของฉัน + id ตรง)
-        bool isMyHeldRecommended() {
-          return status == 'held' &&
-              holdBy != null &&
-              currentUid != null &&
-              holdBy == currentUid &&
-              isRecommended;
-        }
+        // ถ้าอยากให้กระพริบเฉพาะ "ที่จองของฉัน" ให้ใช้บรรทัดล่างแทน:
+        // final bool blink = status == 'held' && holdBy != null && currentUid != null && holdBy == currentUid && isRecommended;
 
-        // base color ตามสถานะ
+        // จากคำขอ: กดค้นหาแล้วอยากให้ "ช่องที่ถูกแนะนำ" กระพริบเขียว↔เหลือง
+        final bool blink = isRecommended;
+
+        // base color ตามสถานะ (ใช้ตอน "ไม่กระพริบ")
         Color baseColor;
         switch (status) {
           case 'available':
@@ -97,63 +109,64 @@ class _ParkingBoxState extends State<ParkingBox>
             baseColor = Colors.grey;
             break;
           case 'held':
-            // ถูกจับจองอยู่ (ถ้าเป็นของเรา เดี๋ยวจะมี overlay กระพริบ)
             baseColor = Colors.amber.shade700;
             break;
           default:
             baseColor = Colors.black;
         }
 
-        final bool blink = isMyHeldRecommended();
+        // คุมแอนิเมชันตาม blink
+        _ensureBlinking(blink);
 
-        return AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            // ถ้า blink ให้ overlay สีเหลืองโปร่งใสสลับ เพื่อเอฟเฟกต์กระพริบ
-            final Color renderColor =
-                blink
-                    ? Color.alphaBlend(_colorAnimation.value!, baseColor)
-                    : baseColor;
-
-            return GestureDetector(
-              onTap: () {
-                if (status == 'occupied' && startTime != null) {
-                  final elapsed = _getElapsedTime(startTime);
-                  showDialog(
-                    context: context,
-                    builder:
-                        (_) => AlertDialog(
-                          title: Text('ช่อง ${widget.id}'),
-                          content: Text('ใช้งานมาแล้ว: $elapsed'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('ปิด'),
-                            ),
-                          ],
-                        ),
-                  );
-                }
-              },
-              child: Container(
-                width: widget.direction == Axis.vertical ? 30 : 45,
-                height: widget.direction == Axis.vertical ? 45 : 30,
-                decoration: BoxDecoration(
-                  color: renderColor,
-                  border: Border.all(color: Colors.white),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                alignment: Alignment.center,
-                child: FittedBox(
-                  child: Text(
-                    '${widget.id}',
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ),
+        Widget box(Color color) {
+          return Container(
+            width: widget.direction == Axis.vertical ? 30 : 45,
+            height: widget.direction == Axis.vertical ? 45 : 30,
+            decoration: BoxDecoration(
+              color: color,
+              border: Border.all(color: Colors.white),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            alignment: Alignment.center,
+            child: FittedBox(
+              child: Text(
+                '${widget.id}',
+                style: const TextStyle(color: Colors.white, fontSize: 12),
               ),
-            );
+            ),
+          );
+        }
+
+        final child = GestureDetector(
+          onTap: () {
+            if (status == 'occupied' && startTime != null) {
+              final elapsed = _getElapsedTime(startTime);
+              showDialog(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: Text('ช่อง ${widget.id}'),
+                  content: Text('ใช้งานมาแล้ว: $elapsed'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('ปิด'),
+                    ),
+                  ],
+                ),
+              );
+            }
           },
+          child: blink
+              // โหมด "กระพริบ": ใช้สีจากทวีน (เขียว↔เหลือง)
+              ? AnimatedBuilder(
+                  animation: _blinkColor,
+                  builder: (_, __) => box(_blinkColor.value ?? Colors.green),
+                )
+              // โหมดปกติ: ใช้สีฐานตามสถานะจริง
+              : box(baseColor),
         );
+
+        return child;
       },
     );
   }
