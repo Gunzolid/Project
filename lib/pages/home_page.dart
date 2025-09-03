@@ -1,16 +1,55 @@
+// lib/pages/home_page.dart
 import 'package:flutter/material.dart';
-import 'package:mtproject/pages/searching_page.dart';
-import 'package:mtproject/pages/profile_page.dart';
-import 'package:mtproject/models/parking_map_layout.dart'; // ✅ ใช้อันนี้แทน grid
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class HomePage extends StatelessWidget {
-  final int? recommendedSpot; // ✅ ปรับให้รับ int (ตาม searching page ใหม่)
+import 'package:mtproject/pages/searching_page.dart';
+import 'package:mtproject/pages/profile_page.dart';
+import 'package:mtproject/models/parking_map_layout.dart';
+import 'package:mtproject/ui/recommend_dialog.dart';
 
+class HomePage extends StatefulWidget {
   const HomePage({super.key, this.recommendedSpot});
+  final int? recommendedSpot;
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  int? _recommendedSpotLocal;
+
+  @override
+  void initState() {
+    super.initState();
+    _recommendedSpotLocal = widget.recommendedSpot;
+  }
+
+  Future<void> _onSearchPressed() async {
+    // ✅ รอผลลัพธ์จาก SearchingPage (ต้อง pop กลับมาด้วย spotId)
+    final int? resultSpotId = await Navigator.push<int?>(
+      context,
+      MaterialPageRoute(builder: (_) => const SearchingPage()),
+    );
+
+    if (!mounted) return;
+
+    if (resultSpotId != null) {
+      setState(() => _recommendedSpotLocal = resultSpotId);
+
+      // ✅ โชว์ popup: ช่องที่แนะนำ + ถามเปิด Google Maps
+      await showRecommendDialog(context, recommendedIds: [resultSpotId]);
+    } else {
+      // ไม่เจอ/ยกเลิก
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ไม่พบช่องที่เหมาะสมในตอนนี้')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final rec = _recommendedSpotLocal;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Smart Parking Assistant"),
@@ -20,7 +59,7 @@ class HomePage extends StatelessWidget {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const ProfilePage()),
+                MaterialPageRoute(builder: (_) => const ProfilePage()),
               );
             },
           ),
@@ -30,13 +69,9 @@ class HomePage extends StatelessWidget {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // ✅ แสดงแผนผังแบบ Stack
             Expanded(
-              child: ParkingMapLayout(
-                recommendedSpot: recommendedSpot,
-              ),
+              child: ParkingMapLayout(recommendedSpot: rec),
             ),
-
             const SizedBox(height: 16),
 
             Row(
@@ -52,52 +87,34 @@ class HomePage extends StatelessWidget {
                     return Text(
                       "จำนวนพื้นที่ว่าง: $available/52",
                       style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                        fontSize: 16, fontWeight: FontWeight.bold),
                     );
                   },
                 ),
               ],
             ),
-            const SizedBox(height: 8),
 
-            if (recommendedSpot != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Text(
-                  "แนะนำช่องที่จอด: ช่อง $recommendedSpot",
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green,
-                  ),
-                ),
+            if (rec != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                "แนะนำช่องที่จอด: ช่อง $rec",
+                style: const TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.bold, color: Colors.green),
               ),
-            const SizedBox(height: 20),
+            ],
 
+            const SizedBox(height: 20),
             SizedBox(
-              width: double.infinity,
-              height: 50,
+              width: double.infinity, height: 50,
               child: ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const SearchingPage(),
-                    ),
-                  );
-                },
+                onPressed: _onSearchPressed, // ✅ ใช้เมธอดด้านบน
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.grey[400],
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                child: const Text(
-                  'ค้นหา',
-                  style: TextStyle(color: Colors.black),
-                ),
+                child: const Text('ค้นหา', style: TextStyle(color: Colors.black)),
               ),
             ),
           ],

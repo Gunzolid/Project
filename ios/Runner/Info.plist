@@ -44,7 +44,9 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
-	
+	<!-- ขอสิทธิ์ตำแหน่งขณะใช้งานแอป -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>แอปต้องใช้ตำแหน่งของคุณเพื่อคำนวณเส้นทางไปยังที่จอดรถ</string>
 	<true/>
 </dict>
 </plist>

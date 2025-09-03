@@ -1,5 +1,4 @@
 // lib/data/layout_xy.dart
-// พิกัด x=left, y=top ตามตำแหน่งที่ให้มา
 const Map<int, Map<String, int>> kLayoutXY = {
   1: {'x': 195, 'y': 140},
   2: {'x': 165, 'y': 140},
