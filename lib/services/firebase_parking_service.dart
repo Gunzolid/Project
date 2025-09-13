@@ -1,223 +1,172 @@
+// lib/services/firebase_parking_service.dart
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:mtproject/data/layout_xy.dart';
-import 'package:mtproject/data/path_order.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class FirebaseParkingService {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
 
-  CollectionReference get spotsCollection => _db.collection('parking_spots');
+  FirebaseParkingService({FirebaseFirestore? db, FirebaseAuth? auth})
+      : _db = db ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance;
 
-  /// ดึงที่จอดว่าง (client-side) — ใช้ชั่วคราวช่วง dev
-  Future<DocumentSnapshot?> getRecommendedSpot() async {
-    final query =
-        await spotsCollection.where('status', isEqualTo: 'available').get();
+  /// เลือก candidate (เปลี่ยนเป็น logic จริง เช่น orderBy('path_order'))
+  Future<int?> _pickCandidateId() async {
+    final qs = await _db
+        .collection('parking_spots')
+        .where('status', isEqualTo: 'available')
+        .orderBy('id')
+        .limit(1)
+        .get();
 
-    if (query.docs.isNotEmpty) {
-      query.docs.sort((a, b) {
-        final idA = int.tryParse(a['id']?.toString() ?? '') ?? 999999;
-        final idB = int.tryParse(b['id']?.toString() ?? '') ?? 999999;
-        return idA.compareTo(idB);
-      });
-      return query.docs.first;
-    }
+    if (qs.docs.isEmpty) return null;
+    final data = qs.docs.first.data() as Map<String, dynamic>;
+    final id = data['id'];
+    if (id is int) return id;
+    if (id is num) return id.toInt();
     return null;
   }
 
-  Future<void> occupySpot(String docId) async {
-    await spotsCollection.doc(docId).update({
-      'status': 'occupied',
-      'start_time': FieldValue.serverTimestamp(),
-      'duration_minutes': 0,
-      'last_updated': FieldValue.serverTimestamp(),
-      'hold_by': null,
-      'hold_expires_at': null,
-    });
-  }
+  /// จองชั่วคราว (ดีฟอลต์ 15 นาที = 900 วินาที)
+  Future<int?> recommendAndHoldClient({int holdSeconds = 900}) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) throw Exception('ต้องล็อกอินก่อน');
 
-  Future<void> releaseSpot(String docId) async {
-    await spotsCollection.doc(docId).update({
-      'status': 'available',
-      'start_time': null,
-      'duration_minutes': 0,
-      'last_updated': FieldValue.serverTimestamp(),
-      'hold_by': null,
-      'hold_expires_at': null,
-    });
-  }
+    final candidateId = await _pickCandidateId();
+    if (candidateId == null) return null;
 
-  Future<void> markSpotUnavailable(String docId) async {
-    await spotsCollection.doc(docId).update({
-      'status': 'unavailable',
-      'start_time': null,
-      'duration_minutes': 0,
-      'last_updated': FieldValue.serverTimestamp(),
-      'hold_by': null,
-      'hold_expires_at': null,
-    });
-  }
+    final ref = _db.collection('parking_spots').doc('$candidateId');
 
-  Future<void> updateDuration(String docId) async {
-    final snap = await spotsCollection.doc(docId).get();
-    final data = snap.data() as Map<String, dynamic>?;
-    if (data == null) return;
+    return _db.runTransaction<int?>((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists) return null;
+      final data = snap.data() as Map<String, dynamic>;
 
-    if (data['start_time'] != null && data['status'] == 'occupied') {
-      final Timestamp start = data['start_time'];
-      final minutes = DateTime.now().difference(start.toDate()).inMinutes;
-      await spotsCollection.doc(docId).update({
-        'duration_minutes': minutes,
+      final String status = (data['status'] ?? 'available') as String;
+      final Timestamp? holdExp = data['hold_expires_at'] as Timestamp?;
+      final now = DateTime.now();
+
+      final bool notExpired =
+          holdExp != null && holdExp.toDate().isAfter(now);
+      if (status != 'available' || notExpired) return null;
+
+      tx.update(ref, {
+        'status': 'held',
+        'hold_by': uid,
+        'hold_expires_at':
+            Timestamp.fromDate(now.add(Duration(seconds: holdSeconds))),
         'last_updated': FieldValue.serverTimestamp(),
       });
-    }
+
+      final idVal = data['id'];
+      return (idVal is num) ? idVal.toInt() : null;
+    });
   }
 
-  Future<List<Map<String, dynamic>>> getAllSpots() async {
-    final query = await spotsCollection.orderBy('id').get();
-    return query.docs.map((doc) {
-      final data = (doc.data() as Map<String, dynamic>)..['docId'] = doc.id;
-      return data;
-    }).toList();
-  }
-
-  // ========= SEED HELPERS =========
-
-  /// เติม/อัปเดต x,y และ hold_* สำหรับช่อง 1..[count] จาก layout
-  /// - ถ้าเอกสารยังไม่มี จะถูกสร้าง
-  /// - ไม่ทับสถานะ/เวลาเดิม (status/start_time/duration_minutes)
-  Future<void> seedFromLayout({int count = 52}) async {
-    final now = FieldValue.serverTimestamp();
-    final batch = _db.batch();
-
-    for (int i = 1; i <= count; i++) {
-      final ref = spotsCollection.doc(i.toString());
-      final xy = kLayoutXY[i] ?? const {'x': 0, 'y': 0};
-
-      batch.set(
-        ref,
-        {
-          // ensure id และพิกัด
-          'id': i,
-          'x': xy['x'] ?? 0,
-          'y': xy['y'] ?? 0,
-
-          // เตรียมฟิลด์สำหรับระบบแนะนำ/IoT
-          'hold_by': null,
-          'hold_expires_at': null,
-
-          // metadata
-          'last_updated': now,
-
-          // *** ไม่ยุ่งกับ status/start_time/duration_minutes ***
-        },
-        SetOptions(merge: true), // จะเติมฟิลด์ที่ขาด และไม่ทับของเดิม
+  /// ฟังสถานะช่องที่ถูกจอง: ถ้าหมดเวลา/ถูกเปลี่ยน → expired
+  Stream<RecommendationState> watchRecommendation(int spotId) {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) {
+      return Stream<RecommendationState>.value(
+        RecommendationState.expired('ไม่ได้ล็อกอิน'),
       );
     }
 
-    await batch.commit();
+    final ref = _db.collection('parking_spots').doc('$spotId');
+    return ref.snapshots().map((snap) {
+      if (!snap.exists) {
+        return RecommendationState.expired('ข้อมูลช่องถูกลบ');
+      }
+      final data = snap.data() as Map<String, dynamic>?;
+      if (data == null) {
+        return RecommendationState.expired('ไม่มีข้อมูลช่อง');
+      }
+
+      final String status = (data['status'] ?? 'available') as String;
+      final String? holdBy = data['hold_by'] as String?;
+      final Timestamp? holdExp = data['hold_expires_at'] as Timestamp?;
+      final now = DateTime.now();
+
+      if (status != 'held' || holdBy != uid) {
+        return RecommendationState.expired('ช่องถูกเปลี่ยนสถานะ');
+      }
+
+      if (holdExp != null && holdExp.toDate().isBefore(now)) {
+        return RecommendationState.expired('หมดเวลา 15 นาทีแล้ว');
+      }
+
+      return RecommendationState.active(expiresAt: holdExp?.toDate());
+    });
   }
 
-  /// (ออปชัน) seed เฉพาะช่วงเลขช่อง
-  Future<void> seedRange(int startId, int endId) async {
-    final now = FieldValue.serverTimestamp();
-    final batch = _db.batch();
+  /// เช็คอิน (held -> occupied)
+  Future<void> checkIn(int spotId) async {
+    final ref = _db.collection('parking_spots').doc('$spotId');
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists) return;
+      final data = snap.data() as Map<String, dynamic>;
+      if (data['status'] != 'held') return;
 
-    for (int i = startId; i <= endId; i++) {
-      final ref = spotsCollection.doc(i.toString());
-      final xy = kLayoutXY[i] ?? const {'x': 0, 'y': 0};
-      batch.set(ref, {
-        'id': i,
-        'x': xy['x'] ?? 0,
-        'y': xy['y'] ?? 0,
-        'hold_by': null,
-        'hold_expires_at': null,
-        'last_updated': now,
-      }, SetOptions(merge: true));
-    }
-    await batch.commit();
+      tx.update(ref, {
+        'status': 'occupied',
+        'start_time': FieldValue.serverTimestamp(),
+        'last_updated': FieldValue.serverTimestamp(),
+      });
+    });
   }
 
-  // ===== ช่วยช่วง dev (ปุ่ม/เมนู) =====
-  Future<void> setStatus(String docId, String status) async {
-    final ref = spotsCollection.doc(docId);
-    final now = Timestamp.now();
+  /// เคลียร์ hold ถ้าหมดเวลาแล้ว
+  Future<void> clearIfExpired(int spotId) async {
+    final ref = _db.collection('parking_spots').doc('$spotId');
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists) return;
+      final data = snap.data() as Map<String, dynamic>;
+      if (data['status'] != 'held') return;
 
-    final base = <String, dynamic>{'status': status, 'last_updated': now};
+      final Timestamp? holdExp = data['hold_expires_at'] as Timestamp?;
+      final now = DateTime.now();
+      if (holdExp != null && holdExp.toDate().isAfter(now)) return;
 
-    if (status == 'occupied') {
-      base['start_time'] = now;
-      base['duration_minutes'] = 0;
-      base['hold_by'] = null;
-      base['hold_expires_at'] = null;
-    } else if (status == 'available') {
-      base['start_time'] = null;
-      base['duration_minutes'] = 0;
-      base['hold_by'] = null;
-      base['hold_expires_at'] = null;
-    } else if (status == 'unavailable') {
-      base['start_time'] = null;
-      base['duration_minutes'] = 0;
-      base['hold_by'] = null;
-      base['hold_expires_at'] = null;
-    }
-
-    await ref.set(base, SetOptions(merge: true));
-  }
-
-  Future<void> setAllAvailable() async {
-    final qs = await spotsCollection.get();
-    final now = Timestamp.now();
-    final batch = _db.batch();
-    for (final d in qs.docs) {
-      batch.set(d.reference, {
+      tx.update(ref, {
         'status': 'available',
-        'start_time': null,
-        'duration_minutes': 0,
         'hold_by': null,
         'hold_expires_at': null,
-        'last_updated': now,
-      }, SetOptions(merge: true));
-    }
-    await batch.commit();
+        'start_time': null,
+        'last_updated': FieldValue.serverTimestamp(),
+      });
+    });
   }
 
-  Future<void> releaseAllHeld() async {
-    final qs = await spotsCollection.where('status', isEqualTo: 'held').get();
-    final now = Timestamp.now();
-    final batch = _db.batch();
-    for (final d in qs.docs) {
-      batch.set(d.reference, {
-        'status': 'available',
-        'start_time': null,
-        'duration_minutes': 0,
+    /// Admin เปลี่ยนสถานะช่อง (ใช้ docId ซึ่งเป็น String)
+  Future<void> setStatus(String docId, String newStatus) async {
+    final ref = _db.collection('parking_spots').doc(docId);
+
+    await ref.update({
+      'status': newStatus,
+      'last_updated': FieldValue.serverTimestamp(),
+      if (newStatus == 'available') ...{
         'hold_by': null,
         'hold_expires_at': null,
-        'last_updated': now,
-      }, SetOptions(merge: true));
-    }
-    await batch.commit();
+        'start_time': null,
+      }
+    });
   }
+}
 
-  // เพิ่มเมธอดนี้ใน class FirebaseParkingService
-  /// เลือกที่จอดตาม "ลำดับเส้นทาง one-way"
-  /// - ดึงเฉพาะช่องที่ status == available แล้วเลือกตัวแรกที่ปรากฏใน kPathOrder
-  Future<DocumentSnapshot?> getRecommendedByPathOrder() async {
-    final qs =
-        await spotsCollection.where('status', isEqualTo: 'available').get();
-    if (qs.docs.isEmpty) return null;
+/// ใช้บอกสถานะ recommendation
+class RecommendationState {
+  final bool isActive;
+  final DateTime? expiresAt;
+  final String? reason;
 
-    // map: id -> DocumentSnapshot
-    final byId = <int, DocumentSnapshot>{};
-    for (final d in qs.docs) {
-      final id = int.tryParse((d['id'] ?? '').toString());
-      if (id != null) byId[id] = d;
-    }
+  const RecommendationState._(this.isActive, this.expiresAt, this.reason);
 
-    for (final id in kPathOrder) {
-      final doc = byId[id];
-      if (doc != null) return doc;
-    }
+  factory RecommendationState.active({DateTime? expiresAt}) =>
+      RecommendationState._(true, expiresAt, null);
 
-    // fallback: ถ้าไม่มีใน order (ไม่น่าจะเกิด)
-    return qs.docs.first;
-  }
+  factory RecommendationState.expired(String? reason) =>
+      RecommendationState._(false, null, reason);
 }

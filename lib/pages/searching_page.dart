@@ -40,26 +40,26 @@ class _SearchingPageState extends State<SearchingPage> {
 
     // 2) Fallback โหมด dev บน client
     try {
-      final doc = await _svc.getRecommendedByPathOrder()
-          .timeout(const Duration(seconds: 4));
+  final spotId = await FirebaseParkingService().recommendAndHoldClient(
+    holdSeconds: 900, // 15 นาที
+  );
+  if (!mounted) return;
 
-      if (!mounted || _done) return;
-
-      if (doc != null) {
-        _done = true;
-        Navigator.pop<int>(context, doc['id'] as int); // ✅ ส่ง spotId กลับ
-      } else {
-        _noSpotAndBack();
-      }
-    } on TimeoutException {
-      if (!mounted || _done) return;
-      _show('ค้นหานานเกินไป กรุณาลองใหม่');
-      _backWithoutSpot();
-    } catch (e) {
-      if (!mounted || _done) return;
-      _show('เกิดข้อผิดพลาด: $e');
-      _backWithoutSpot();
-    }
+  if (spotId != null) {
+    Navigator.pop<int>(context, spotId); // ให้ Home โชว์ popup ต่อ
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('ช่วงนี้มีคนจองพร้อมกัน ลองใหม่อีกครั้ง')),
+    );
+    Navigator.pop<int?>(context, null);
+  }
+} catch (e) {
+  if (!mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('เกิดข้อผิดพลาด: $e')),
+  );
+  Navigator.pop<int?>(context, null);
+}
   }
 
   void _noSpotAndBack() {

@@ -1,15 +1,15 @@
-// lib/pages/home_page.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import 'package:mtproject/pages/searching_page.dart';
 import 'package:mtproject/pages/profile_page.dart';
 import 'package:mtproject/models/parking_map_layout.dart';
-import 'package:mtproject/ui/recommend_dialog.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:mtproject/services/firebase_parking_service.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.recommendedSpot});
   final int? recommendedSpot;
+
+  const HomePage({super.key, this.recommendedSpot});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -17,39 +17,69 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int? _recommendedSpotLocal;
+  StreamSubscription? _recSub;
 
   @override
   void initState() {
     super.initState();
     _recommendedSpotLocal = widget.recommendedSpot;
-  }
-
-  Future<void> _onSearchPressed() async {
-    // ✅ รอผลลัพธ์จาก SearchingPage (ต้อง pop กลับมาด้วย spotId)
-    final int? resultSpotId = await Navigator.push<int?>(
-      context,
-      MaterialPageRoute(builder: (_) => const SearchingPage()),
-    );
-
-    if (!mounted) return;
-
-    if (resultSpotId != null) {
-      setState(() => _recommendedSpotLocal = resultSpotId);
-
-      // ✅ โชว์ popup: ช่องที่แนะนำ + ถามเปิด Google Maps
-      await showRecommendDialog(context, recommendedIds: [resultSpotId]);
-    } else {
-      // ไม่เจอ/ยกเลิก
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ไม่พบช่องที่เหมาะสมในตอนนี้')),
-      );
+    if (_recommendedSpotLocal != null) {
+      _watchSpot(_recommendedSpotLocal!);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    final rec = _recommendedSpotLocal;
+  void dispose() {
+    _recSub?.cancel();
+    super.dispose();
+  }
 
+  Future<void> _startSearching() async {
+    final resultSpotId = await Navigator.push<int?>(
+      context,
+      MaterialPageRoute(builder: (_) => const SearchingPage()),
+    );
+
+    if (resultSpotId != null) {
+      setState(() => _recommendedSpotLocal = resultSpotId);
+
+      // Popup แจ้งผู้ใช้
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('ผลการค้นหา'),
+          content: Text(
+              'แนะนำช่องที่จอด: ช่อง $resultSpotId\nคุณมีเวลา 15 นาทีในการเข้าที่จอดนี้'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('ปิด'),
+            ),
+          ],
+        ),
+      );
+
+      // ฟังสถานะ spot
+      _watchSpot(resultSpotId);
+    }
+  }
+
+  void _watchSpot(int spotId) {
+    _recSub?.cancel();
+    _recSub = FirebaseParkingService().watchRecommendation(spotId).listen((st) {
+      if (!st.isActive) {
+        final msg = st.reason ?? 'ช่องหมดเวลา/ถูกเปลี่ยนสถานะ';
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(msg)));
+          setState(() => _recommendedSpotLocal = null);
+        }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Smart Parking Assistant"),
@@ -59,7 +89,7 @@ class _HomePageState extends State<HomePage> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const ProfilePage()),
+                MaterialPageRoute(builder: (context) => const ProfilePage()),
               );
             },
           ),
@@ -69,11 +99,15 @@ class _HomePageState extends State<HomePage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
+            // แผนผังที่จอดรถ
             Expanded(
-              child: ParkingMapLayout(recommendedSpot: rec),
+              child: ParkingMapLayout(
+                recommendedSpot: _recommendedSpotLocal,
+              ),
             ),
             const SizedBox(height: 16),
 
+            // จำนวนพื้นที่ว่าง
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -87,34 +121,47 @@ class _HomePageState extends State<HomePage> {
                     return Text(
                       "จำนวนพื้นที่ว่าง: $available/52",
                       style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold),
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     );
                   },
                 ),
               ],
             ),
+            const SizedBox(height: 8),
 
-            if (rec != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                "แนะนำช่องที่จอด: ช่อง $rec",
-                style: const TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.bold, color: Colors.green),
+            if (_recommendedSpotLocal != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text(
+                  "แนะนำช่องที่จอด: ช่อง $_recommendedSpotLocal",
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
               ),
-            ],
 
             const SizedBox(height: 20),
+
+            // ปุ่มค้นหา
             SizedBox(
-              width: double.infinity, height: 50,
+              width: double.infinity,
+              height: 50,
               child: ElevatedButton(
-                onPressed: _onSearchPressed, // ✅ ใช้เมธอดด้านบน
+                onPressed: _startSearching,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.grey[400],
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                child: const Text('ค้นหา', style: TextStyle(color: Colors.black)),
+                child: const Text(
+                  'ค้นหา',
+                  style: TextStyle(color: Colors.black),
+                ),
               ),
             ),
           ],
