@@ -3,6 +3,16 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+const List<int> kSpotOrder = [
+  // ขอบด้าน บน
+  1, 2, 3, 27, 28, 29,
+  // ขอบด้าน ซ้าย
+  4, 5, 30, 31, 6, 7, 8, 32, 33, 34, 9, 10, 11, 35, 36, 37, 12, 13, 38, 39,
+  // ขอบด้าน ล่าง
+  40, 41, 42, 14, 15, 16,
+  // ขอบด้าน ขวา
+  17, 18, 43, 44, 19, 20, 21, 45, 46, 47, 22, 23, 24, 48, 49, 50, 25, 26, 51, 52,
+];
 class FirebaseParkingService {
   final FirebaseFirestore _db;
   final FirebaseAuth _auth;
@@ -11,22 +21,30 @@ class FirebaseParkingService {
       : _db = db ?? FirebaseFirestore.instance,
         _auth = auth ?? FirebaseAuth.instance;
 
+
+
   /// เลือก candidate (เปลี่ยนเป็น logic จริง เช่น orderBy('path_order'))
   Future<int?> _pickCandidateId() async {
-    final qs = await _db
-        .collection('parking_spots')
-        .where('status', isEqualTo: 'available')
-        .orderBy('id')
-        .limit(1)
-        .get();
+  // ดึงเฉพาะช่องที่ว่าง จากนั้น sort ตาม kSpotOrder ในฝั่งแอป
+  final qs = await _db
+      .collection('parking_spots')
+      .where('status', isEqualTo: 'available')
+      .get();
 
-    if (qs.docs.isEmpty) return null;
-    final data = qs.docs.first.data() as Map<String, dynamic>;
-    final id = data['id'];
-    if (id is int) return id;
-    if (id is num) return id.toInt();
-    return null;
+  if (qs.docs.isEmpty) return null;
+
+  // แปลงเป็นเซ็ตของ id ที่ว่าง
+  final availableIds = qs.docs
+      .map((d) => (d.data()['id'] as num).toInt())
+      .toSet();
+
+  // เดินตามลำดับที่กำหนดไว้ แล้วเลือกตัวแรกที่ว่าง
+  for (final id in kSpotOrder) {
+    if (availableIds.contains(id)) return id;
   }
+  // เผื่อกรณีมี id ใหม่ที่ไม่อยู่ในลิสต์ ให้ตกลงมาเลือกตัวแรกๆ
+  return availableIds.isNotEmpty ? availableIds.first : null;
+}
 
   /// จองชั่วคราว (ดีฟอลต์ 15 นาที = 900 วินาที)
   Future<int?> recommendAndHoldClient({int holdSeconds = 900}) async {

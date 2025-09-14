@@ -1,14 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:mtproject/pages/searching_page.dart';
 import 'package:mtproject/pages/profile_page.dart';
 import 'package:mtproject/models/parking_map_layout.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mtproject/services/firebase_parking_service.dart';
 
 class HomePage extends StatefulWidget {
   final int? recommendedSpot;
-
   const HomePage({super.key, this.recommendedSpot});
 
   @override
@@ -49,7 +49,8 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => AlertDialog(
           title: const Text('ผลการค้นหา'),
           content: Text(
-              'แนะนำช่องที่จอด: ช่อง $resultSpotId\nคุณมีเวลา 15 นาทีในการเข้าที่จอดนี้'),
+            'แนะนำช่องที่จอด: ช่อง $resultSpotId\nคุณมีเวลา 15 นาทีในการเข้าที่จอดนี้',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -66,7 +67,9 @@ class _HomePageState extends State<HomePage> {
 
   void _watchSpot(int spotId) {
     _recSub?.cancel();
-    _recSub = FirebaseParkingService().watchRecommendation(spotId).listen((st) {
+    _recSub = FirebaseParkingService()
+        .watchRecommendation(spotId)
+        .listen((st) {
       if (!st.isActive) {
         final msg = st.reason ?? 'ช่องหมดเวลา/ถูกเปลี่ยนสถานะ';
         if (mounted) {
@@ -89,7 +92,7 @@ class _HomePageState extends State<HomePage> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const ProfilePage()),
+                MaterialPageRoute(builder: (_) => const ProfilePage()),
               );
             },
           ),
@@ -99,7 +102,7 @@ class _HomePageState extends State<HomePage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // แผนผังที่จอดรถ
+            // แผนผังที่จอด
             Expanded(
               child: ParkingMapLayout(
                 recommendedSpot: _recommendedSpotLocal,
@@ -107,7 +110,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 16),
 
-            // จำนวนพื้นที่ว่าง
+            // จำนวนพื้นที่ว่าง (handle error/รอเชื่อมต่อ)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -117,6 +120,13 @@ class _HomePageState extends State<HomePage> {
                       .where('status', isEqualTo: 'available')
                       .snapshots(),
                   builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const Text('โหลดข้อมูลไม่ได้');
+                    }
+                    if (snapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      return const Text('กำลังเชื่อมต่อ...');
+                    }
                     final available = snapshot.data?.docs.length ?? 0;
                     return Text(
                       "จำนวนพื้นที่ว่าง: $available/52",
