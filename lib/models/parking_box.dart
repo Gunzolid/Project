@@ -29,12 +29,10 @@ class _ParkingBoxState extends State<ParkingBox>
   void initState() {
     super.initState();
     _controller = AnimationController(
-      // ความเร็วกระพริบ ปรับได้
       duration: const Duration(milliseconds: 800),
       vsync: this,
     );
 
-    // เปลี่ยนสีจาก "เขียว -> เหลือง" แล้ว reverse กลับเป็น "เขียว"
     _blinkColor = ColorTween(
       begin: Colors.green,
       end: Colors.yellow,
@@ -47,7 +45,6 @@ class _ParkingBoxState extends State<ParkingBox>
     super.dispose();
   }
 
-  // เรียกทุกครั้งที่ prop เปลี่ยน เพื่อ start/stop ตามสถานะ blink
   void _ensureBlinking(bool shouldBlink) {
     if (shouldBlink) {
       if (!_controller.isAnimating) {
@@ -72,11 +69,15 @@ class _ParkingBoxState extends State<ParkingBox>
 
   @override
   Widget build(BuildContext context) {
+    // ดึง uid ของผู้ใช้ปัจจุบันมาเก็บไว้
+    final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
+
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('parking_spots')
-          .doc(widget.docId)
-          .snapshots(),
+      stream:
+          FirebaseFirestore.instance
+              .collection('parking_spots')
+              .doc(widget.docId)
+              .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.data() == null) {
           return const SizedBox(width: 30, height: 45);
@@ -86,17 +87,13 @@ class _ParkingBoxState extends State<ParkingBox>
         final String status = (data['status'] ?? 'available') as String;
         final Timestamp? startTime = data['start_time'] as Timestamp?;
         final String? holdBy = data['hold_by'] as String?;
-        final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
 
         final bool isRecommended = widget.recommendedId == widget.id;
-
-        // ถ้าอยากให้กระพริบเฉพาะ "ที่จองของฉัน" ให้ใช้บรรทัดล่างแทน:
-        // final bool blink = status == 'held' && holdBy != null && currentUid != null && holdBy == currentUid && isRecommended;
-
-        // จากคำขอ: กดค้นหาแล้วอยากให้ "ช่องที่ถูกแนะนำ" กระพริบเขียว↔เหลือง
         final bool blink = isRecommended;
 
-        // base color ตามสถานะ (ใช้ตอน "ไม่กระพริบ")
+        // =================================================================
+        //  VVV      จุดแก้ไขที่สำคัญที่สุดอยู่ตรงนี้      VVV
+        // =================================================================
         Color baseColor;
         switch (status) {
           case 'available':
@@ -109,13 +106,19 @@ class _ParkingBoxState extends State<ParkingBox>
             baseColor = Colors.grey;
             break;
           case 'held':
-            baseColor = Colors.amber.shade700;
+            // ถ้าสถานะเป็น held ให้เช็คว่าเป็นของเราหรือไม่
+            if (holdBy != null && holdBy == currentUid) {
+              baseColor = Colors.orange; // หรือ Colors.amber.shade700 ตามเดิม
+            } else {
+              // ถ้าไม่ใช่ของเรา ให้แสดงเป็นสีเขียวเหมือนยังว่างอยู่
+              baseColor = Colors.green;
+            }
             break;
           default:
             baseColor = Colors.black;
         }
+        // =================================================================
 
-        // คุมแอนิเมชันตาม blink
         _ensureBlinking(blink);
 
         Widget box(Color color) {
@@ -143,27 +146,27 @@ class _ParkingBoxState extends State<ParkingBox>
               final elapsed = _getElapsedTime(startTime);
               showDialog(
                 context: context,
-                builder: (_) => AlertDialog(
-                  title: Text('ช่อง ${widget.id}'),
-                  content: Text('ใช้งานมาแล้ว: $elapsed'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('ปิด'),
+                builder:
+                    (_) => AlertDialog(
+                      title: Text('ช่อง ${widget.id}'),
+                      content: Text('ใช้งานมาแล้ว: $elapsed'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('ปิด'),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
               );
             }
           },
-          child: blink
-              // โหมด "กระพริบ": ใช้สีจากทวีน (เขียว↔เหลือง)
-              ? AnimatedBuilder(
-                  animation: _blinkColor,
-                  builder: (_, __) => box(_blinkColor.value ?? Colors.green),
-                )
-              // โหมดปกติ: ใช้สีฐานตามสถานะจริง
-              : box(baseColor),
+          child:
+              blink
+                  ? AnimatedBuilder(
+                    animation: _blinkColor,
+                    builder: (_, __) => box(_blinkColor.value ?? Colors.green),
+                  )
+                  : box(baseColor),
         );
 
         return child;
