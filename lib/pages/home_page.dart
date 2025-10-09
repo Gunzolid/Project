@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // <-- 1. Import FirebaseAuth
 import 'package:mtproject/pages/searching_page.dart';
 import 'package:mtproject/pages/profile_page.dart';
 import 'package:mtproject/models/parking_map_layout.dart';
@@ -23,10 +24,38 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _recommendedSpotLocal = widget.recommendedSpot;
-    if (_recommendedSpotLocal != null) {
-      _watchSpot(_recommendedSpotLocal!);
+    // 2. เรียกใช้ฟังก์ชันตรวจสอบการจองเมื่อหน้านี้ถูกสร้าง
+    _checkExistingHold();
+  }
+
+  // =================================================================
+  //  VVV      3. เพิ่มฟังก์ชันใหม่สำหรับตรวจสอบการจอง      VVV
+  // =================================================================
+  Future<void> _checkExistingHold() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final heldSpotQuery =
+        await FirebaseFirestore.instance
+            .collection('parking_spots')
+            .where('hold_by', isEqualTo: user.uid)
+            .limit(1)
+            .get();
+
+    if (heldSpotQuery.docs.isNotEmpty) {
+      final heldSpotDoc = heldSpotQuery.docs.first;
+      final spotId = int.tryParse(heldSpotDoc.id);
+
+      if (spotId != null && mounted) {
+        print("Found existing held spot: $spotId");
+        setState(() {
+          _recommendedSpotLocal = spotId; // อัปเดต State ของแอป
+        });
+        _watchSpot(spotId); // เริ่มติดตามสถานะของช่องที่จองไว้
+      }
     }
   }
+  // =================================================================
 
   @override
   void dispose() {
@@ -35,18 +64,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _startSearching() async {
-    // =================================================================
-    //  VVV      จุดแก้ไขที่สำคัญที่สุดอยู่ตรงนี้      VVV
-    // =================================================================
-    // หากกำลังค้นหาอยู่ ให้หยุดการทำงานทันที ไม่ต้องทำอะไรต่อ
-    if (_isSearching) {
-      print("Blocked a repeat-press!"); // สำหรับ Debug
-      return;
-    }
-    // =================================================================
+    if (_isSearching) return;
 
     setState(() {
-      _isSearching = true; // ปิดการใช้งานปุ่มทันที
+      _isSearching = true;
     });
 
     try {
@@ -81,7 +102,7 @@ class _HomePageState extends State<HomePage> {
     } finally {
       if (mounted) {
         setState(() {
-          _isSearching = false; // คืนค่าเมื่อการค้นหาทั้งหมดจบลง
+          _isSearching = false;
         });
       }
     }
@@ -104,7 +125,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // รวมเงื่อนไขการปิดปุ่มไว้ในตัวแปรเดียวเพื่อความชัดเจน
     final bool canSearch = !_isSearching && _recommendedSpotLocal == null;
 
     return Scaffold(
@@ -176,7 +196,6 @@ class _HomePageState extends State<HomePage> {
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                // ใช้เงื่อนไขโดยตรงในการควบคุม onPressed และ style
                 onPressed: canSearch ? _startSearching : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor:
