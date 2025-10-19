@@ -5,22 +5,20 @@ import 'package:firebase_auth/firebase_auth.dart';
 class ParkingFunctions {
   static final _functions = FirebaseFunctions.instance;
 
-  /// เรียก Cloud Function: recommendSpot
-  /// - server จะเลือก + ล็อกช่องแบบ `held` (กันชนพร้อมกัน)
-  /// - คืน docId, id และเวลาหมดสิทธิ์ (ถ้ามี)
   static Future<({String docId, int id, DateTime? holdExpiresAt})?> recommend({
     int entryX = 0,
     int entryY = 0,
     int holdSeconds = 120,
   }) async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
-    final callable = _functions.httpsCallable('recommendSpot');
+    // VVV แก้ไขบรรทัดนี้ VVV
+    final callable = _functions.httpsCallable('recommendAndHold');
     final res = await callable.call({
       'uid': uid,
       'entry': {'x': entryX, 'y': entryY},
       'holdSeconds': holdSeconds,
     });
-
+    // ... (โค้ดส่วนที่เหลือเหมือนเดิม) ...
     final data = Map<String, dynamic>.from(res.data);
     if (data['ok'] != true) return null;
 

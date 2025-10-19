@@ -21,45 +21,30 @@ class _SearchingPageState extends State<SearchingPage> {
   }
 
   Future<void> _startSearching() async {
-    // 1) ลองเรียก Cloud Function (ถ้ามี)
     try {
+      // ใช้ Cloud Function เพียงอย่างเดียว
       final result = await ParkingFunctions.recommend(
-        entryX: 310,
-        entryY: 150,
-        holdSeconds: 120,
-      ).timeout(const Duration(seconds: 6));
+        holdSeconds: 900, // 15 นาที
+      ).timeout(const Duration(seconds: 8)); // เพิ่ม timeout กันรอนาน
 
-      if (mounted && !_done && result != null) {
-        _done = true;
-        Navigator.pop<int>(context, result.id); // ✅ ส่ง spotId กลับไป HomePage
-        return;
+      if (mounted && !_done) {
+        if (result != null) {
+          _done = true;
+          // ✅ ส่ง spotId กลับไป HomePage
+          Navigator.pop<int>(context, result.id);
+        } else {
+          // กรณี Cloud Function คืนค่า null (ไม่มีช่องว่าง)
+          _show('ขออภัย ขณะนี้ไม่มีช่องจอดว่าง');
+          _backWithoutSpot();
+        }
       }
-    } catch (_) {
-      // เงียบ ๆ แล้วไป fallback
+    } catch (e) {
+      // กรณีเกิด Error หรือ Timeout
+      if (mounted && !_done) {
+        _show('เกิดข้อผิดพลาดในการค้นหา: $e');
+        _backWithoutSpot();
+      }
     }
-
-    // 2) Fallback โหมด dev บน client
-    try {
-  final spotId = await FirebaseParkingService().recommendAndHoldClient(
-    holdSeconds: 900, // 15 นาที
-  );
-  if (!mounted) return;
-
-  if (spotId != null) {
-    Navigator.pop<int>(context, spotId); // ให้ Home โชว์ popup ต่อ
-  } else {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('ช่วงนี้มีคนจองพร้อมกัน ลองใหม่อีกครั้ง')),
-    );
-    Navigator.pop<int?>(context, null);
-  }
-} catch (e) {
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('เกิดข้อผิดพลาด: $e')),
-  );
-  Navigator.pop<int?>(context, null);
-}
   }
 
   void _noSpotAndBack() {

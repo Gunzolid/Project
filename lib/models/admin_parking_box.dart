@@ -50,7 +50,8 @@ class AdminParkingBox extends StatelessWidget {
           onTap: () async {
             try {
               final next = _nextStatus(status);
-              await _svc.setStatus(docId, next);
+              // VVV แก้ไขบรรทัดนี้ VVV
+              await _svc.updateParkingStatus(docId, next);
             } catch (e) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('เปลี่ยนสถานะไม่สำเร็จ: $e')),

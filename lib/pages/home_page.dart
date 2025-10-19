@@ -110,16 +110,27 @@ class _HomePageState extends State<HomePage> {
 
   void _watchSpot(int spotId) {
     _recSub?.cancel();
-    _recSub = FirebaseParkingService().watchRecommendation(spotId).listen((st) {
-      if (!st.isActive) {
-        final msg = st.reason ?? 'ช่องหมดเวลา/ถูกเปลี่ยนสถานะ';
+    _recSub = FirebaseParkingService().watchRecommendation(spotId).listen((
+      recommendation,
+    ) {
+      // รับ object ที่มีข้อมูลครบถ้วน
+
+      // ตรวจสอบว่าการจองสิ้นสุดลงแล้วหรือยัง (ไม่ว่าจะด้วยเหตุผลใดก็ตาม)
+      if (!recommendation.isActive) {
+        // ใช้ข้อความจาก Service เพื่อแจ้งผู้ใช้
+        final msg = recommendation.reason ?? 'การจองสิ้นสุดลงแล้ว';
+
         if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text(msg)));
+
+          // **คำสั่งสำคัญ:** ล้างค่าการจองในแอป และปลดล็อกปุ่มค้นหา
           setState(() => _recommendedSpotLocal = null);
         }
+        _recSub?.cancel(); // หยุดการติดตาม
       }
+      // ถ้า recommendation.isActive เป็น true แสดงว่าการจองยังดำเนินอยู่ ก็ไม่ต้องทำอะไร
     });
   }
 
