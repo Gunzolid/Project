@@ -134,9 +134,43 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  Future<void> _cancelCurrentHold() async {
+    if (_recommendedSpotLocal == null)
+      return; // ป้องกันการเรียกใช้เมื่อไม่มีการจอง
+
+    final spotToCancel =
+        _recommendedSpotLocal!; // เก็บ ID ไว้ก่อนเผื่อมีการเปลี่ยนแปลง State
+
+    // อาจจะเพิ่ม Dialog ยืนยันตรงนี้ก็ได้ (Optional)
+    // final confirm = await showDialog<bool>( ... );
+    // if (confirm != true) return;
+
+    try {
+      await FirebaseParkingService().cancelHold(spotToCancel);
+
+      // สำคัญ: ล้าง State ในแอปเพื่อให้ UI อัปเดต
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('ยกเลิกการจองช่อง $spotToCancel สำเร็จ')),
+        );
+        setState(() {
+          _recommendedSpotLocal = null;
+        });
+        _recSub?.cancel(); // หยุดติดตามสถานะช่องเดิม
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('เกิดข้อผิดพลาดในการยกเลิก: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool canSearch = !_isSearching && _recommendedSpotLocal == null;
+    final bool hasRecommendation = _recommendedSpotLocal != null;
 
     return Scaffold(
       appBar: AppBar(
@@ -190,16 +224,30 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             const SizedBox(height: 8),
-            if (_recommendedSpotLocal != null)
+            if (hasRecommendation) // <-- ใช้ตัวแปรเช็ค
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
-                child: Text(
-                  "แนะนำช่องที่จอด: ช่อง $_recommendedSpotLocal",
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green,
-                  ),
+                child: Row(
+                  // <-- ใช้ Row เพื่อวางข้อความกับปุ่มข้างกัน
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "แนะนำช่องที่จอด: ช่อง $_recommendedSpotLocal",
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                    TextButton.icon(
+                      icon: const Icon(Icons.cancel, color: Colors.red),
+                      label: const Text(
+                        'ยกเลิก',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                      onPressed: _cancelCurrentHold, // <-- เรียกฟังก์ชันยกเลิก
+                    ),
+                  ],
                 ),
               ),
             const SizedBox(height: 20),
