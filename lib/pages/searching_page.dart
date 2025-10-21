@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:mtproject/services/parking_functions.dart'; // โหมดจริง (Cloud Functions)
 import 'package:mtproject/services/firebase_parking_service.dart'; // โหมด dev (client)
+import 'package:mtproject/ui/recommend_dialog.dart';
 
 class SearchingPage extends StatefulWidget {
   const SearchingPage({super.key});
@@ -22,24 +23,35 @@ class _SearchingPageState extends State<SearchingPage> {
 
   Future<void> _startSearching() async {
     try {
-      // ใช้ Cloud Function เพียงอย่างเดียว
       final result = await ParkingFunctions.recommend(
         holdSeconds: 900, // 15 นาที
-      ).timeout(const Duration(seconds: 8)); // เพิ่ม timeout กันรอนาน
+      ).timeout(const Duration(seconds: 8));
 
       if (mounted && !_done) {
         if (result != null) {
-          _done = true;
-          // ✅ ส่ง spotId กลับไป HomePage
-          Navigator.pop<int>(context, result.id);
+          _done = true; // ตั้งค่าว่าเสร็จสิ้นแล้ว
+
+          // =================================================================
+          //  VVV      จุดแก้ไข: เรียกใช้ฟังก์ชัน และส่ง List<int>      VVV
+          // =================================================================
+          // แสดง Dialog แนะนำ
+          await showRecommendDialog(
+            // <-- เรียกฟังก์ชันโดยตรง
+            context,
+            recommendedIds: [result.id], // <-- ส่ง ID ในรูปแบบ List
+          );
+
+          // หลังจาก Dialog ปิด ให้ Pop กลับไปหน้า Home
+          if (mounted) {
+            Navigator.pop<int>(context, result.id);
+          }
+          // =================================================================
         } else {
-          // กรณี Cloud Function คืนค่า null (ไม่มีช่องว่าง)
           _show('ขออภัย ขณะนี้ไม่มีช่องจอดว่าง');
           _backWithoutSpot();
         }
       }
     } catch (e) {
-      // กรณีเกิด Error หรือ Timeout
       if (mounted && !_done) {
         _show('เกิดข้อผิดพลาดในการค้นหา: $e');
         _backWithoutSpot();
