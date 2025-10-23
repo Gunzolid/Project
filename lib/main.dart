@@ -6,6 +6,7 @@ import 'package:mtproject/pages/login_page.dart';
 import 'package:mtproject/pages/home_page.dart';
 import 'package:mtproject/pages/admin_parking_page.dart';
 import 'firebase_options.dart';
+import 'package:mtproject/services/theme_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,14 +19,45 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: const AuthChecker(), // ตรวจสอบการล็อกอิน
+    // 2. ใช้ ValueListenableBuilder ครอบ MaterialApp
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier, // ฟังการเปลี่ยนแปลงจาก themeNotifier
+      builder: (_, currentMode, __) {
+        // currentMode คือ ThemeMode ปัจจุบัน
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+
+          // Theme สว่าง
+          theme: ThemeData(
+            brightness: Brightness.light,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.deepPurple,
+              brightness: Brightness.light,
+            ),
+            useMaterial3: true,
+          ),
+
+          // Theme มืด
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.deepPurple,
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+
+          // 3. ตั้งค่า themeMode ตามค่าที่ได้จาก ValueListenableBuilder
+          themeMode: currentMode,
+
+          home: const AuthChecker(),
+        );
+      },
     );
   }
 }
 
-// ตรวจสอบว่า User ล็อกอินหรือยัง และเป็น admin หรือไม่
+// ... (AuthChecker เหมือนเดิม) ...
 class AuthChecker extends StatelessWidget {
   const AuthChecker({super.key});
 
@@ -34,8 +66,10 @@ class AuthChecker extends StatelessWidget {
     if (user == null) return const LoginPage();
 
     final uid = user.uid;
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-    final role = doc.data()?['role'] ?? 'user';
+    final docSnapshot =
+        await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final role =
+        docSnapshot.exists ? (docSnapshot.data()?['role'] ?? 'user') : 'user';
 
     if (role == 'admin') {
       return const AdminParkingPage();
@@ -49,12 +83,20 @@ class AuthChecker extends StatelessWidget {
     return FutureBuilder<Widget>(
       future: _getStartPage(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        return snapshot.data!;
+        if (snapshot.hasError) {
+          return const Scaffold(
+            body: Center(child: Text('เกิดข้อผิดพลาดในการโหลดข้อมูลผู้ใช้')),
+          );
+        }
+        if (snapshot.hasData) {
+          return snapshot.data!;
+        }
+        return const LoginPage();
       },
     );
   }

@@ -43,7 +43,7 @@ class AdminParkingBox extends StatelessWidget {
             color = Colors.grey;
             break;
           default:
-            color = Colors.black;
+            color = Colors.orangeAccent;
         }
 
         return GestureDetector(
