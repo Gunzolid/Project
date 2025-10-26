@@ -1,22 +1,43 @@
+// lib/models/admin_parking_box.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:mtproject/services/firebase_parking_service.dart';
 
 class AdminParkingBox extends StatelessWidget {
+  // ยังคงเป็น StatelessWidget
   final String docId;
   final int id;
   final Axis direction;
-  AdminParkingBox({
+
+  const AdminParkingBox({
+    // <-- ใช้ const constructor ได้
     super.key,
     required this.docId,
     required this.id,
     this.direction = Axis.vertical,
   });
 
-  final _svc = FirebaseParkingService();
+  // ฟังก์ชันหา status ถัดไป (ย้ายมาไว้ข้างนอก build หรือจะไว้ข้างในก็ได้)
+  String _nextStatus(String current) {
+    if (current == 'available') return 'occupied';
+    if (current == 'occupied') return 'unavailable';
+    if (current == 'unavailable' || current == 'held') return 'available';
+    return 'available'; // Default case
+  }
 
   @override
   Widget build(BuildContext context) {
+    // สร้าง Service ภายใน build method (คล้าย parking_box ที่ใช้ FirebaseAuth.instance)
+    final FirebaseParkingService parkingService = FirebaseParkingService();
+
+    // --- สี (ยังคง Hardcode หรือจะดึงจาก Theme ก็ได้) ---
+    const availableColor = Colors.green;
+    const occupiedColor = Colors.red;
+    const unavailableColor = Colors.grey;
+    const heldColor = Colors.orange; // เพิ่ม held เผื่อ Admin เห็น
+    const defaultColor = Colors.black;
+    const textColor = Colors.white;
+
     return StreamBuilder<DocumentSnapshot>(
       stream:
           FirebaseFirestore.instance
@@ -24,38 +45,87 @@ class AdminParkingBox extends StatelessWidget {
               .doc(docId)
               .snapshots(),
       builder: (context, snapshot) {
+        // --- ส่วนจัดการ Loading/Error ---
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return Container(
+            // แสดง Placeholder ขณะรอข้อมูลครั้งแรก
+            width: direction == Axis.vertical ? 30 : 45,
+            height: direction == Axis.vertical ? 45 : 30,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              border: Border.all(color: Colors.white),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            alignment: Alignment.center,
+          );
+        }
+        if (snapshot.hasError) {
+          return Tooltip(
+            // แสดง Tooltip บอก Error
+            message: 'Error: ${snapshot.error}',
+            child: Container(
+              width: direction == Axis.vertical ? 30 : 45,
+              height: direction == Axis.vertical ? 45 : 30,
+              decoration: BoxDecoration(color: Colors.black /*...*/),
+              alignment: Alignment.center,
+              child: const Icon(
+                Icons.error_outline,
+                color: Colors.red,
+                size: 18,
+              ),
+            ),
+          );
+        }
         if (!snapshot.hasData || snapshot.data?.data() == null) {
-          return const SizedBox(width: 30, height: 45);
+          return Container(
+            /* Placeholder ว่างเปล่า */
+          ); // กรณี Document ไม่มีข้อมูล
         }
 
+        // --- ส่วนแสดงผลหลัก ---
         final data = snapshot.data!.data() as Map<String, dynamic>;
         final status = (data['status'] ?? 'unknown') as String;
 
         Color color;
         switch (status) {
           case 'available':
-            color = Colors.green;
+            color = availableColor;
             break;
           case 'occupied':
-            color = Colors.red;
+            color = occupiedColor;
             break;
           case 'unavailable':
-            color = Colors.grey;
+            color = unavailableColor;
             break;
+          case 'held':
+            color = heldColor;
+            break; // เพิ่ม held
           default:
-            color = Colors.orangeAccent;
+            color = defaultColor;
         }
 
         return GestureDetector(
           onTap: () async {
             try {
-              final next = _nextStatus(status);
-              // VVV แก้ไขบรรทัดนี้ VVV
-              await _svc.updateParkingStatus(docId, next);
+              final nextStatus = _nextStatus(status);
+              final Map<String, dynamic> updateData = {'status': nextStatus};
+
+              if (nextStatus == 'occupied') {
+                updateData['start_time'] = Timestamp.now();
+              } else {
+                updateData['start_time'] = null;
+              }
+              // ใช้ parkingService ที่สร้างใน build method
+              await parkingService.updateParkingStatus(docId, updateData);
             } catch (e) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('เปลี่ยนสถานะไม่สำเร็จ: $e')),
-              );
+              if (ScaffoldMessenger.maybeOf(context) != null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('เปลี่ยนสถานะไม่สำเร็จ: $e')),
+                );
+              } else {
+                print('Error updating status for $docId: $e');
+              }
             }
           },
           child: Container(
@@ -68,17 +138,14 @@ class AdminParkingBox extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: FittedBox(
-              child: Text('$id', style: const TextStyle(color: Colors.white)),
+              child: Text(
+                '$id',
+                style: const TextStyle(color: textColor, fontSize: 12),
+              ),
             ),
           ),
         );
       },
     );
-  }
-
-  String _nextStatus(String current) {
-    if (current == 'available') return 'occupied';
-    if (current == 'occupied') return 'unavailable';
-    return 'available'; // รวมกรณี unavailable/unknown → available
   }
 }

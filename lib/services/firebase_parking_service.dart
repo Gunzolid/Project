@@ -18,10 +18,19 @@ class FirebaseParkingService {
     return _firestore.collection('parking_spots').snapshots();
   }
 
-  Future<void> updateParkingStatus(String docId, String newStatus) {
-    return _firestore.collection('parking_spots').doc(docId).update({
-      'status': newStatus,
-    });
+  Future<void> updateParkingStatus(
+    String docId,
+    Map<String, dynamic> dataToUpdate,
+  ) {
+    // เพิ่มการตรวจสอบเบื้องต้น (Optional)
+    if (dataToUpdate.isEmpty) {
+      return Future.value(); // ถ้าไม่มีข้อมูลให้อัปเดต ก็ไม่ต้องทำอะไร
+    }
+    // ใช้ dataToUpdate ในการอัปเดต
+    return _firestore
+        .collection('parking_spots')
+        .doc(docId)
+        .update(dataToUpdate);
   }
 
   // 2. ปรับปรุง Logic การติดตามสถานะให้ฉลาดขึ้น
@@ -139,6 +148,41 @@ class FirebaseParkingService {
       });
     } catch (e) {
       debugPrint('Failed to cancel hold for spot $spotId: $e');
+      rethrow; // ส่งต่อ Error ให้ UI จัดการ
+    }
+  }
+
+  Future<void> updateAllSpotsStatus(String targetStatus) async {
+    // ตรวจสอบว่าสถานะที่ต้องการถูกต้องหรือไม่ (Optional)
+    if (targetStatus != 'available' && targetStatus != 'unavailable') {
+      throw ArgumentError('Invalid target status provided.');
+    }
+
+    print('Attempting to set all spots to: $targetStatus');
+
+    final spotsCollection = _firestore.collection('parking_spots');
+    final WriteBatch batch = _firestore.batch(); // สร้าง Batch Write
+
+    try {
+      // 1. ดึงข้อมูล ID ของทุกช่องจอด
+      final QuerySnapshot allSpotsSnapshot = await spotsCollection.get();
+
+      // 2. วนลูปเพื่อเพิ่มคำสั่ง update ลงใน batch
+      for (QueryDocumentSnapshot spotDoc in allSpotsSnapshot.docs) {
+        final Map<String, dynamic> updateData = {
+          'status': targetStatus,
+          // ล้างค่าอื่นๆ ที่ไม่เกี่ยวข้องเมื่อตั้งเป็น available/unavailable
+          'hold_by': null,
+          'hold_until': null,
+          'start_time': null,
+        };
+        batch.update(spotDoc.reference, updateData);
+      }
+
+      // 3. ส่งคำสั่งทั้งหมดใน batch ไปทำงานพร้อมกัน
+      await batch.commit();
+      print('All spots updated to: $targetStatus');
+    } catch (e) {
       rethrow; // ส่งต่อ Error ให้ UI จัดการ
     }
   }
