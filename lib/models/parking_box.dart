@@ -1,3 +1,4 @@
+// lib/models/parking_box.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -34,7 +35,7 @@ class _ParkingBoxState extends State<ParkingBox>
     );
 
     _blinkColor = ColorTween(
-      begin: Colors.green,
+      begin: Colors.green, // อาจจะต้องปรับสีนี้ตาม Theme
       end: Colors.yellow,
     ).animate(_controller);
   }
@@ -67,9 +68,31 @@ class _ParkingBoxState extends State<ParkingBox>
     return '$minutes นาที';
   }
 
+  // --- สร้าง Helper function สำหรับวาดกล่อง ---
+  Widget _buildBox(Color color, {Color textColor = Colors.white}) {
+    return Container(
+      width: widget.direction == Axis.vertical ? 30 : 45,
+      height: widget.direction == Axis.vertical ? 45 : 30,
+      decoration: BoxDecoration(
+        color: color,
+        border: Border.all(
+          color: Colors.white.withOpacity(0.5),
+        ), // ลดความเข้มขอบ
+        borderRadius: BorderRadius.circular(4),
+      ),
+      alignment: Alignment.center,
+      child: FittedBox(
+        child: Text(
+          '${widget.id}',
+          style: TextStyle(color: textColor, fontSize: 12),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // ดึง uid ของผู้ใช้ปัจจุบันมาเก็บไว้
+    // ดึง uid ของผู้ใช้ปัจจุบัน (อาจจะเป็น null ถ้ายังไม่ login)
     final String? currentUid = FirebaseAuth.instance.currentUser?.uid;
 
     return StreamBuilder<DocumentSnapshot>(
@@ -79,10 +102,30 @@ class _ParkingBoxState extends State<ParkingBox>
               .doc(widget.docId)
               .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.data() == null) {
-          return const SizedBox(width: 30, height: 45);
+        // =================================================================
+        //  VVV      1. จัดการ Offline/Loading View      VVV
+        // =================================================================
+        // ถ้ายังไม่มีข้อมูล (กำลังโหลด หรือ offline)
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            !snapshot.hasData ||
+            snapshot.data!.data() == null) {
+          // ใช้สีเทาที่เข้ากับ Theme
+          final offlineColor =
+              Theme.of(context).brightness == Brightness.light
+                  ? Colors.grey.shade300
+                  : Colors.grey.shade800;
+          final offlineTextColor =
+              Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey;
+          return _buildBox(offlineColor, textColor: offlineTextColor);
         }
 
+        // ถ้า Error (เช่น ไม่มี permission หรือ offline นานๆ)
+        if (snapshot.hasError) {
+          return _buildBox(Colors.black, textColor: Colors.red); // แสดงเป็นสีดำ
+        }
+        // =================================================================
+
+        // --- ถ้ามีข้อมูล (Online) ---
         final data = snapshot.data!.data() as Map<String, dynamic>;
         final String status = (data['status'] ?? 'available') as String;
         final Timestamp? startTime = data['start_time'] as Timestamp?;
@@ -91,9 +134,6 @@ class _ParkingBoxState extends State<ParkingBox>
         final bool isRecommended = widget.recommendedId == widget.id;
         final bool blink = isRecommended;
 
-        // =================================================================
-        //  VVV      จุดแก้ไขที่สำคัญที่สุดอยู่ตรงนี้      VVV
-        // =================================================================
         Color baseColor;
         switch (status) {
           case 'available':
@@ -105,42 +145,29 @@ class _ParkingBoxState extends State<ParkingBox>
           case 'unavailable':
             baseColor = Colors.grey;
             break;
+
+          // =================================================================
+          //  VVV      2. จัดการ Anonymous View (held)      VVV
+          // =================================================================
           case 'held':
-            // ถ้าสถานะเป็น held ให้เช็คว่าเป็นของเราหรือไม่
-            if (holdBy != null && holdBy == currentUid) {
-              baseColor = Colors.orange; // หรือ Colors.amber.shade700 ตามเดิม
+            // ถ้า login อยู่ และเป็นคนจอง ให้แสดงสีส้ม
+            if (currentUid != null && holdBy == currentUid) {
+              baseColor = Colors.orange;
             } else {
-              // ถ้าไม่ใช่ของเรา ให้แสดงเป็นสีเขียวเหมือนยังว่างอยู่
+              // ถ้าไม่ login หรือเป็นคนอื่นจอง ให้แสดงเป็นสีเขียว
               baseColor = Colors.green;
             }
             break;
+          // =================================================================
+
           default:
             baseColor = Colors.black;
         }
-        // =================================================================
 
         _ensureBlinking(blink);
 
-        Widget box(Color color) {
-          return Container(
-            width: widget.direction == Axis.vertical ? 30 : 45,
-            height: widget.direction == Axis.vertical ? 45 : 30,
-            decoration: BoxDecoration(
-              color: color,
-              border: Border.all(color: Colors.white),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            alignment: Alignment.center,
-            child: FittedBox(
-              child: Text(
-                '${widget.id}',
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
-          );
-        }
-
-        final child = GestureDetector(
+        // --- ส่วน GestureDetector (เหมือนเดิม) ---
+        return GestureDetector(
           onTap: () {
             if (status == 'occupied' && startTime != null) {
               final elapsed = _getElapsedTime(startTime);
@@ -164,12 +191,13 @@ class _ParkingBoxState extends State<ParkingBox>
               blink
                   ? AnimatedBuilder(
                     animation: _blinkColor,
-                    builder: (_, __) => box(_blinkColor.value ?? Colors.green),
+                    builder:
+                        (_, __) => _buildBox(
+                          _blinkColor.value ?? Colors.green,
+                        ), // ใช้ _buildBox
                   )
-                  : box(baseColor),
+                  : _buildBox(baseColor), // ใช้ _buildBox
         );
-
-        return child;
       },
     );
   }
