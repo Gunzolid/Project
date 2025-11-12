@@ -1,12 +1,26 @@
 diff --git a/README.md b/README.md
-index 2aa62ee4a87d89cc2f119444592df2375a328fcb..af4070782956e3c90a6b71ca9c1a07a8655458fb 100644
+index 2aa62ee..af40707 100644
 --- a/README.md
 +++ b/README.md
 @@ -1,16 +1,419 @@
 -# mtproject
-+# Smart Parking Flutter App
- 
+-
 -A new Flutter project.
+-
+-## Getting Started
+-
+-This project is a starting point for a Flutter application.
+-
+-A few resources to get you started if this is your first Flutter project:
+-
+-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+-
+-For help getting started with Flutter development, view the
+-[online documentation](https://docs.flutter.dev/), which offers tutorials,
+-samples, guidance on mobile development, and a full API reference.
++# Smart Parking Flutter App
++
 +## Table of Contents
 +- [English](#english)
 +  - [Project Overview](#project-overview)
@@ -48,15 +62,12 @@ index 2aa62ee4a87d89cc2f119444592df2375a328fcb..af4070782956e3c90a6b71ca9c1a07a8
 +  - [Contributing Guidelines](#contributing-guidelines-1)
 +  - [License](#license-1)
 +  - [Changelog](#changelog-1)
- 
--## Getting Started
++
 +## English
- 
--This project is a starting point for a Flutter application.
++
 +### Project Overview
 +A Flutter-based smart parking application that integrates Firebase Authentication, Firestore, and Cloud Functions to orchestrate real-time parking spot availability for drivers and administrators. The app renders an interactive parking map, reserves spots on demand, streams occupancy updates, and routes users based on their roles. An external IoT firmware (not yet committed) is expected to publish bay telemetry to Firestore.
- 
--A few resources to get you started if this is your first Flutter project:
++
 +### Key Features
 +- Email/password authentication with automatic Firestore profile provisioning and role-based routing between public home and admin consoles.
 +- Interactive parking-lot layout (`ParkingMapLayout`) with zoom/pan, live Firestore streams, and highlight of held spots.
@@ -66,19 +77,14 @@ index 2aa62ee4a87d89cc2f119444592df2375a328fcb..af4070782956e3c90a6b71ca9c1a07a8
 +- Admin dashboard (`AdminParkingPage`) with per-slot cycling across `available → occupied → unavailable → available`, batched “set all” controls, and automatic hold cleanup via Cloud Functions triggers.
 +- Profile management (rename, theme toggle, account deletion, logout) and theme persistence through a global `ValueNotifier<ThemeMode>`.
 +- Cloud Functions v2 codebase handling recommendations, email synchronization, and hold cleanup, with Node 20 runtime support.
- 
--- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
--- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
++
 +### Architecture
 +- **Presentation layer**: Flutter `pages/` for login, signup, home, search, admin, profile, and edit profile flows. `ui/recommend_dialog.dart` encapsulates modal UX.
 +- **State & services**: `services/` contains Firebase integration (`FirebaseParkingService`, `FirebaseService`, `ParkingFunctions`, `UserBootstrap`, `theme_manager`). Logic subscribes to Firestore streams and callable Cloud Functions.
 +- **Models**: Layout metadata (`models/parking_layout_config.dart`, `parking_map_layout.dart`, `admin_parking_map_layout.dart`) and helper classes (e.g., Google Maps directions).
 +- **Data flow**: Flutter widgets read/write Firestore collections (`parking_spots`, `users`) and call Cloud Functions. Firestore triggers enforce data consistency (hold cleanup, email sync). IoT firmware (C++) will ultimately push occupancy data to `parking_spots` via REST/SDK once integrated.
 +- **IoT boundary**: Firmware runs outside this repo; the mobile app expects consistent document schemas and spot IDs published by the device network.
- 
--For help getting started with Flutter development, view the
--[online documentation](https://docs.flutter.dev/), which offers tutorials,
--samples, guidance on mobile development, and a full API reference.
++
 +### Tech Stack
 +- **Frontend**: Flutter 3.x / Dart >= 3.7 (`environment.sdk ^3.7.0`), Material 3 UI.
 +- **Packages**: `firebase_core`, `firebase_auth`, `cloud_firestore`, `cloud_functions`, `geolocator`, `url_launcher`, `email_validator`, `cupertino_icons`.
@@ -370,10 +376,10 @@ index 2aa62ee4a87d89cc2f119444592df2375a328fcb..af4070782956e3c90a6b71ca9c1a07a8
 +- **Cloud Function เรียกผ่านแอป**: `recommendAndHold` เลือกช่องว่างถัดไป จอง และตอบกลับ `{docId, id, hold_expires_at}`
 +- **ทริกเกอร์ Firestore**:
 +  - `onSpotTaken` ล้างข้อมูลการจองเมื่อสถานะเปลี่ยนเป็น `occupied` หรือ `unavailable`
-+  - `syncAuthEmailToFirestoreOnUpdate` ให้ข้อมูลอีเมลใน Firestore ตรงกับ Firebase Auth
+  - `syncAuthEmailToFirestoreOnUpdate` ให้ข้อมูลอีเมลใน Firestore ตรงกับ Firebase Auth
 +- **คอลเลกชัน Firestore**:
-+  - `parking_spots`: เอกสารตามหมายเลขช่อง มี `status`, `hold_by`, `hold_until`, `start_time`
-+  - `users`: เก็บชื่อ อีเมล บทบาท และ timestamp สำหรับการนำทางและโปรไฟล์
+  - `parking_spots`: เอกสารตามหมายเลขช่อง มี `status`, `hold_by`, `hold_until`, `start_time`
+  - `users`: เก็บชื่อ อีเมล บทบาท และ timestamp สำหรับการนำทางและโปรไฟล์
 +- **การเชื่อมต่อภายนอก**: เฟิร์มแวร์ IoT จะอัปเดต `parking_spots`; ต้องยืนยัน API/โปรโตคอลอีกครั้ง `<TODO: ระบุ API สำหรับ IoT>`
 +
 +### IoT Firmware (C++)
